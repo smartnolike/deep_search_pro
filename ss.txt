@@ -1,1 +1,62 @@
-1
+You are the Lead AI Architect.
+
+Do NOT generate any implementation code.
+
+Your task is to design an enterprise-grade AI Agent Platform.
+
+Tech Stack:
+- Python 3.12
+- FastAPI
+- LangGraph
+- LangChain
+- Pydantic v2
+- AsyncIO
+- Redis
+- PostgreSQL
+- MCP
+- OpenAI Compatible Models
+
+The platform will eventually support:
+
+- 50+ Agents
+- 500+ Tools
+- Multi-Agent Collaboration
+- Human In The Loop
+- Enterprise RAG
+- Tool Calling
+- MCP
+- Memory
+- Streaming
+- GKE Deployment
+
+Architecture Principles:
+
+- Supervisor is the only orchestrator.
+- Supervisor never executes business logic.
+- Supervisor never collects parameters.
+- Agents own their own business workflows.
+- Tools are stateless.
+- Memory is centralized.
+- Every Agent is an independent LangGraph.
+- Every Agent can be developed independently.
+- Every Agent can be deployed independently.
+- Every Agent can be tested independently.
+
+Design the following:
+
+1. Overall architecture
+2. Mermaid architecture diagram
+3. Package structure
+4. Supervisor responsibilities
+5. Agent responsibilities
+6. Tool Layer
+7. Memory Layer
+8. State definitions
+9. Sequence Diagram
+10. Extension mechanism
+11. Registry mechanism
+12. Logging strategy
+13. Trace strategy
+14. Best practices
+
+DO NOT GENERATE CODE.
