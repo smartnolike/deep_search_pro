@@ -60,3 +60,55 @@ Design the following:
 14. Best practices
 
 DO NOT GENERATE CODE.
+
+
+
+
+
+
+
+Based on the approved architecture.
+
+Generate ONLY the project scaffold.
+
+Do NOT implement any business logic.
+
+Generate:
+
+app/
+
+supervisor/
+
+agents/
+
+memory/
+
+tools/
+
+models/
+
+prompts/
+
+For every package create:
+
+graph.py
+
+state.py
+
+nodes.py
+
+builder.py
+
+registry.py
+
+config.py
+
+__init__.py
+
+Every function should raise NotImplementedError.
+
+No business logic.
+
+No implementation.
+
+Generate folder tree and interfaces only.
