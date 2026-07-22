@@ -110,3 +110,281 @@ async def create_mcp_client(
     raise ValueError(
         f"Unsupported MCP transport: {config.transport}"
     )
+
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+import httpx
+
+
+class StreamableHTTPClient:
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+
+        self._url = url
+        self._headers = headers or {}
+        self._timeout = timeout
+
+        self._http_client: httpx.AsyncClient | None = None
+
+        self._session_id: str | None = None
+
+        self._request_id = 0
+
+        self._initialized = False
+
+        self._lock = asyncio.Lock()
+
+    async def connect(self) -> None:
+
+        if self._initialized:
+            return
+
+        self._http_client = httpx.AsyncClient(
+            timeout=self._timeout,
+            headers={
+                "Accept": (
+                    "application/json, "
+                    "text/event-stream"
+                ),
+                "Content-Type": "application/json",
+                "Mcp-Protocol-Version": "2025-03-26",
+                **self._headers,
+            },
+        )
+
+        result = await self._request(
+            method="initialize",
+            params={
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "my-mcp-client",
+                    "version": "1.0.0",
+                },
+            },
+        )
+
+        self._initialized = True
+
+        await self._notification(
+            method="notifications/initialized",
+        )
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
+
+        self._ensure_connected()
+
+        return await self._request(
+            method="tools/call",
+            params={
+                "name": name,
+                "arguments": arguments,
+            },
+        )
+
+    async def list_tools(self) -> Any:
+
+        self._ensure_connected()
+
+        return await self._request(
+            method="tools/list",
+            params={},
+        )
+
+    async def close(self) -> None:
+
+        self._initialized = False
+        self._session_id = None
+
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+
+    async def _request(
+        self,
+        method: str,
+        params: dict[str, Any],
+    ) -> Any:
+
+        if self._http_client is None:
+            raise RuntimeError(
+                "MCP client is not connected"
+            )
+
+        async with self._lock:
+
+            self._request_id += 1
+
+            request_id = self._request_id
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            }
+
+            response = await self._http_client.post(
+                self._url,
+                json=payload,
+            )
+
+            response.raise_for_status()
+
+            self._update_session_id(response)
+
+            return self._parse_response(
+                response,
+                request_id,
+            )
+
+    async def _notification(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+
+        if self._http_client is None:
+            raise RuntimeError(
+                "MCP client is not connected"
+            )
+
+        payload = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params or {},
+        }
+
+        response = await self._http_client.post(
+            self._url,
+            json=payload,
+        )
+
+        response.raise_for_status()
+
+        self._update_session_id(response)
+
+    def _update_session_id(
+        self,
+        response: httpx.Response,
+    ) -> None:
+
+        session_id = response.headers.get(
+            "Mcp-Session-Id"
+        )
+
+        if session_id:
+            self._session_id = session_id
+
+            if self._http_client is not None:
+                self._http_client.headers.update(
+                    {
+                        "Mcp-Session-Id": session_id
+                    }
+                )
+
+    def _parse_response(
+        self,
+        response: httpx.Response,
+        request_id: int,
+    ) -> Any:
+
+        content_type = response.headers.get(
+            "content-type",
+            "",
+        )
+
+        if "application/json" in content_type:
+
+            data = response.json()
+
+            return self._parse_json_rpc(
+                data,
+                request_id,
+            )
+
+        if "text/event-stream" in content_type:
+
+            return self._parse_sse_response(
+                response.text,
+                request_id,
+            )
+
+        raise RuntimeError(
+            f"Unsupported MCP response: {content_type}"
+        )
+
+    def _parse_json_rpc(
+        self,
+        data: dict[str, Any],
+        request_id: int,
+    ) -> Any:
+
+        if "error" in data:
+            raise RuntimeError(
+                f"MCP error: {data['error']}"
+            )
+
+        return data.get("result")
+
+    def _parse_sse_response(
+        self,
+        text: str,
+        request_id: int,
+    ) -> Any:
+
+        for line in text.splitlines():
+
+            if line.startswith("data:"):
+
+                data = line[
+                    len("data:"):
+                ].strip()
+
+                if not data:
+                    continue
+
+                json_data = json.loads(data)
+
+                if "error" in json_data:
+                    raise RuntimeError(
+                        f"MCP error: "
+                        f"{json_data['error']}"
+                    )
+
+                if (
+                    json_data.get("id")
+                    == request_id
+                ):
+                    return json_data.get(
+                        "result"
+                    )
+
+        raise RuntimeError(
+            "MCP response not found"
+        )
+
+    def _ensure_connected(self) -> None:
+
+        if (
+            self._http_client is None
+            or not self._initialized
+        ):
+            raise RuntimeError(
+                "MCP client is not connected"
+            )
+
