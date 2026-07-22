@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+from contextlib import AsyncExitStack
+from typing import Any
+
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+
+class StreamableHTTPClient:
+    def __init__(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+        sse_read_timeout: float = 300.0,
+    ) -> None:
+        self._url = url
+        self._headers = headers or {}
+        self._timeout = timeout
+        self._sse_read_timeout = sse_read_timeout
+
+        self._exit_stack = AsyncExitStack()
+        self._session: ClientSession | None = None
+
+        self._connected = False
+
+    async def connect(self) -> None:
+        if self._connected:
+            return
+
+        read_stream, write_stream, _ = await self._exit_stack.enter_async_context(
+            streamablehttp_client(
+                self._url,
+                headers=self._headers,
+                timeout=self._timeout,
+                sse_read_timeout=self._sse_read_timeout,
+            )
+        )
+
+        self._session = await self._exit_stack.enter_async_context(
+            ClientSession(
+                read_stream,
+                write_stream,
+            )
+        )
+
+        await self._session.initialize()
+
+        self._connected = True
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
+        session = self._get_session()
+
+        return await session.call_tool(
+            name,
+            arguments,
+        )
+
+    async def list_tools(self) -> Any:
+        session = self._get_session()
+
+        return await session.list_tools()
+
+    async def close(self) -> None:
+        if not self._connected:
+            return
+
+        self._connected = False
+        self._session = None
+
+        await self._exit_stack.aclose()
+
+    def _get_session(self) -> ClientSession:
+        if self._session is None:
+            raise RuntimeError(
+                "MCP client is not connected"
+            )
+
+        return self._session
+
+
+
+async def create_mcp_client(
+    config: MCPServerConfig,
+) -> MCPClient:
+
+    if config.transport == "streamable_http":
+
+        if not config.url:
+            raise ValueError(
+                f"MCP server URL is required: {config.server_id}"
+            )
+
+        client = StreamableHTTPClient(
+            url=config.url,
+            headers=config.headers,
+            timeout=config.connection_timeout_seconds,
+        )
+
+        await client.connect()
+
+        return client
+
+    raise ValueError(
+        f"Unsupported MCP transport: {config.transport}"
+    )
